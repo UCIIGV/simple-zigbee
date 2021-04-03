@@ -30,9 +30,9 @@
 #ifndef SimpleZigBeePacket_h
 #define SimpleZigBeePacket_h
 
-#include "Arduino.h"
 #include "SimpleZigBeeAddress.h"
 // Required for uint8_t type
+#include <stdlib.h>
 #include <inttypes.h>
 
 // Start Frame Delimiter

@@ -30,8 +30,8 @@
 #ifndef SimpleZigBeeAddress_h
 #define SimpleZigBeeAddress_h
  
-#include "Arduino.h"
 // Required for uint8_t type
+#include <stdlib.h>
 #include <inttypes.h>
 
 // ZigBee 64-bit Broadcast Address

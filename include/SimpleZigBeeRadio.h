@@ -76,8 +76,8 @@
 #ifndef SimpleZigBeeRadio_h
 #define SimpleZigBeeRadio_h
 
-#include "Arduino.h"
 // Requires SimpleZigBeePacket classes
+#include <stdlib.h>
 #include "SimpleZigBeePacket.h"
 // Required for uint8_t type
 #include <inttypes.h>
