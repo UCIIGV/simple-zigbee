@@ -6,3 +6,5 @@ CMakeCache.txt
 *.json
 Makefile
 *.o
+*.a
+install_manifest.txt
