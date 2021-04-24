@@ -1,15 +1,16 @@
-Project(Simple-Zigbee)
+cmake_minimum_required(VERSION 3.19)
 
-set(INCLUDE_DIR "../include")
+project(Simple-Zigbee)
 
-include_directories(INCLUDE_DIR)
+file(GLOB INCLUDES "../include/*.h")
+file(GLOB SOURCES "../src/*.cpp")
 
-file(GLOB SOURCES ../src/*.cpp)
+include_directories("../include" "/usr/local/include")
 
-add_target_library( ${Project_Name} Zigbee STATIC SOURCES)
+add_library(Zigbee ${SOURCES})
 
-set_target_properties(PROPERTIES Simple-Zigbee PUBLIC_HEADER)
+target_link_libraries(Zigbee "/usr/local/include/CppLinuxSerial.a")
 
-install(TARGETS ${Project_Name}
-        LIBRARY DESTINATION /usr/local/lib  
-        FILES ${INCLUDE_DIR} DESTINATION /usr/local/include)
+install(TARGETS Zigbee DESTINATION "/usr/local/lib")
+
+install(FILES INCLUDES DESTINATION /usr/local/include)

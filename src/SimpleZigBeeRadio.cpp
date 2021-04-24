@@ -3,8 +3,7 @@
 */
 
 #include "SimpleZigBeeRadio.h"
-// For Stream class (serial port object)
-#include "LinuxCppSerial/SerialPort.hpp"
+
 
 /*//////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////
@@ -65,7 +64,6 @@ void SimpleZigBeeRadio::resetIncoming(){
 	_in_complete = false;
 	_in_escaping = false;
 	_in_checksum = 0;
-	_in_index = 0;
 }
 
 /**
@@ -75,29 +73,6 @@ void SimpleZigBeeRadio::resetIncoming(){
 */
 void SimpleZigBeeRadio::resetOutgoing(){
 	_outgoing_packet.reset();
-}
-
-/**
-*  Method: setSerial(HardwareSerial & serial)
-*  @ Since v0.1.0 by Eric Burger, September 2013
-*  @ Updated v0.1.1 by Eric Burger, April 2016
-*  @ Set the pointer to the HardwareSerial object communicating with the XBee radio
-*  @ param HardwareSerial& serial: Pointer to HardwareSerial object.
-*/
-void SimpleZigBeeRadio::setSerial(HardwareSerial & serial){
-	_serial = &serial;
-}
-
-/**
-*  Method: setSerial(Stream & serial)
-*  @ Since v0.1.0 by Eric Burger, September 2013
-*  @ Updated v0.1.1 by Eric Burger, April 2016
-*  @ For SoftwareSerial port, set the pointer to the Stream object 
-*    communicating with the XBee radio.
-*  @ param Stream& serial: Pointer to Stream object.
-*/
-void SimpleZigBeeRadio::setSerial(Stream & serial){
-	_serial = &serial;
 }
 
 /*//////////////////////////////////////////////////////////////////////
@@ -127,145 +102,120 @@ SimpleOutgoingZigBeePacket& SimpleZigBeeRadio::getOutgoingPacketObject() {
 /*//////////////////////////////////////////////////////////////////////
 
 /**
-*  Method: available()
-*  @ Since v0.1.0 by Eric Burger, January 2014
-*  @ Checks if bytes received by serial port and returns boolean
-*/
-bool SimpleZigBeeRadio::available(){
-	if( _serial->available() > 0 ){
-		return true;
-	}
-	return false;
-}
-
-/**
 *  Method: read()
 *  @ Since v0.1.0 by Eric Burger, September 2013
 *  @ Reads incoming ZigBee packet from serial port and stores in packet object
 */
 void SimpleZigBeeRadio::read(){
+
+	int i = 0;
 	// Don't do anything if _serial not available
-	if( _serial->available() ){
-		// Before receiving a new packet from the serial buffer, reset incoming packet object, if necessary
-		if( _incoming_packet.isError() || isComplete() ){
-			// Store error code before resetting
-			int err = _incoming_packet.getErrorCode();
-			// If the previous packet was completely received or contained an error, reset.
-			resetIncoming();
-			// If error was caused by UNEXPECTED_PACKET_START, set current index to 1 since the START byte has already been read from the serial buffer.
-			if( UNEXPECTED_PACKET_START == err ){
-				_in_index = 1;
+	// Before receiving a new packet from the serial buffer, reset incoming packet object, if necessary
+	if( _incoming_packet.isError() || isComplete() ){
+		// Store error code before resetting
+		int err = _incoming_packet.getErrorCode();
+		// If the previous packet was completely received or contained an error, reset.
+		resetIncoming();
+		// If error was caused by UNEXPECTED_PACKET_START, set current index to 1 since the START byte has already been read from the serial buffer.
+		if( UNEXPECTED_PACKET_START == err )
+			i = 1;
+	}
+		
+	// Otherwise, if the previous packet was incomplete but free of errors, try and receive the rest of the packet.
+	
+	_serial.Read(_buffer);
+	
+	for( ; i < _buffer.size(); i++){
+			// First, check if XBee is in Escaped API Mode (ATAP=2)
+		if ( _escaped_mode ) {
+			// Next, check if a (non-escaped) start frame delimiter is found anywhere other than the start of the packet.
+			if ( _buffer[i] == START) {
+			// AN ERROR OCCURED
+			// If found, it means that a new packet has started before the previous packet was completely received.
+			// This may indicate a noisy environment or that the buffer overflowed when the previous packet was being 
+			// received by the XBee.
+			// Set error message and return. If read() is called again, packet object will be reset but current index will be set to 1.
+			_incoming_packet.setErrorCode( UNEXPECTED_PACKET_START );
+			return;
+			}
+				
+			// If byte has been flagged as escaped, "un-escape" the byte using the "Excusive bitwise OR" operator (^) 
+			if ( isEscaping() ) {
+				_buffer[i] ^= 0x20;
+				setEscaping(false);
+			}
+				
+			// Check if current byte is escape byte. If true, this indicates that the next byte in the packet has been escaped.
+			if ( _buffer[i] == ESCAPE ) {
+				// Try and read the next byte from the serial buffer, otherwise, note that next byte is escaped by 
+				// setting _escaping to true and continuing loop.
+				// "Un-escape" the byte using the "Excusive bitwise OR" operator (^) 
+				_buffer[i] ^= 0x20;
+			} 
+			else {
+				setEscaping(true);
+				// Jump to the start of the while loop and re-check the condition (maybe buffer will be ready).
+				continue; 
 			}
 		}
-		
-		// Otherwise, if the previous packet was incomplete but free of errors, try and receive the rest of the packet.
-		
-		// Read from serial port, while bytes are available
-		while( _serial->available() ){
-			_in_byte = _serial->read();
-			
-			// First, check if XBee is in Escaped API Mode (ATAP=2)
-			if ( true == _escaped_mode ) {
-				// Next, check if a (non-escaped) start frame delimiter is found anywhere other than the start of the packet.
-				if ( START == _in_byte && _in_index > 0  ) {
-					// AN ERROR OCCURED
-					// If found, it means that a new packet has started before the previous packet was completely received.
-					// This may indicate a noisy environment or that the buffer overflowed when the previous packet was being 
-					// received by the XBee.
-					// Set error message and return. If read() is called again, packet object will be reset but current index will be set to 1.
-					_incoming_packet.setErrorCode( UNEXPECTED_PACKET_START );
-					return;
-				}
-				
-				// If byte has been flagged as escaped, "un-escape" the byte using the "Excusive bitwise OR" operator (^) 
-				if ( true == isEscaping() ) {
-					_in_byte = 0x20 ^ _in_byte;
-					setEscaping(false);
-				}
-				
-				// Check if current byte is escape byte. If true, this indicates that the next byte in the packet has been escaped.
-				if ( _in_byte == ESCAPE && _in_index > 0 ) {
-					// Try and read the next byte from the serial buffer, otherwise, note that next byte is escaped by 
-					// setting _escaping to true and continuing loop.
-					if ( _serial->available() ) {
-						_in_byte = _serial->read();
-						// "Un-escape" the byte using the "Excusive bitwise OR" operator (^) 
-						_in_byte = 0x20 ^ _in_byte;
-					} else {
-						setEscaping(true);
-						// Jump to the start of the while loop and re-check the condition (maybe buffer will be ready).
-						continue; 
-					}
-				}
 
-			}
-			// Note that if the XBee is not in Escaped API Mode (ATAP=2) and the start delimiter is found in a position other than the beginning of a packet,
-			// it is not treated as the start of a packet. In this case, it is treated as just another byte. This can lead to trouble when radios
-			// are placed in a noisy environment.
-			// For reference: http://www.digi.com/support/kbase/kbaseresultdetl?id=2199
+		// Note that if the XBee is not in Escaped API Mode (ATAP=2) and the start delimiter is found in a position other than the beginning of a packet,
+		// it is not treated as the start of a packet. In this case, it is treated as just another byte. This can lead to trouble when radios
+		// are placed in a noisy environment.
+		// For reference: http://www.digi.com/support/kbase/kbaseresultdetl?id=2199
 			
-			// All bytes starting with the Frame Type are included in the checksum
-			if ( _in_index >= FRAME_TYPE_INDEX ) {
-				_in_checksum += _in_byte;
-			}
-			
-			// Start storing incoming information in _incoming_packet object
-			if ( 0 == _in_index ){
-				if ( START == _in_byte ) {
-					// There is nothing to do with the start byte, so move unto the next position.
-					_in_index++;
-				}else{
-					// AN ERROR OCCURED
-					// If START byte was not found, set error code indicating that packet was not read correctly
-					_incoming_packet.setErrorCode( PACKET_INCOMPLETE );
-				}
-			}else if( 1 == _in_index ){
-				// Store "Most Significant Byte" of packet's length
-				_incoming_packet.setFrameLengthMSB(_in_byte);
-				_in_index++;
-			}else if( 2 == _in_index ){
-				// Store "Least Significant Byte" of packet's length
-				_incoming_packet.setFrameLengthLSB(_in_byte);
-				_in_index++;
-			}else{
+		// All bytes starting with the Frame Type are included in the checksum
+		if ( i >= FRAME_TYPE_INDEX ) 
+			_in_checksum += _buffer[i];
+		
+		// Start storing incoming information in _incoming_packet object
+		if ( _buffer[0] != START ) // There is nothing to do with the start byte, so move unto the next position.
+			_incoming_packet.setErrorCode( PACKET_INCOMPLETE );
+
+		if( i == 1 ) // Store "Most Significant Byte" of packet's length
+			_incoming_packet.setFrameLengthMSB(_buffer[i]);
+
+		else if( i == 2 ) // Store "Least Significant Byte" of packet's length
+			_incoming_packet.setFrameLengthLSB(_buffer[i]);
+
+		else {
 				// For the remaining bytes in the packet, check that the maximum frame length has not been exceeded...
-				if ( _in_index > _incoming_packet.getMaxFrameLength() ) {
-					// AN ERROR OCCURED
-					_incoming_packet.setErrorCode( MAX_FRAME_LENGTH_EXCEEDED );
+			if ( i > _incoming_packet.getMaxFrameLength() ) {
+				// AN ERROR OCCURED
+				_incoming_packet.setErrorCode( MAX_FRAME_LENGTH_EXCEEDED );
+				return;
+			}
+			// ...Then check if the end of the packet has been reached (which should be the checksum).
+			// Note: When setFrameLengthLSB() was last called, the frame length of the incoming packet was updated
+			// based on the MSB and LSB. Therefore, the frame length should not have increased due to calls to
+			// setOutgoingFrameData(). 
+			// This length does not include the start byte, MSB, LSB, or checksum byte. Therefore, the length
+			// plus 3 should be the position of the checksum (i.e. frame length plus 4 minus 1).
+			if ( i == _incoming_packet.getFrameLength() + 3) {
+				// Verify checksum using the bitwise AND operator (&)
+				if ( 0xff == (_in_checksum & 0xff) ) {
+					// Success!!! The packet was completely received and the checksum verified.
+					setComplete(true);
+					_incoming_packet.setChecksum(_in_checksum);
+					_incoming_packet.setErrorCode( NO_ERROR );
+				}
+				else{
+					// Failure!!! The packet is not usable because the checksum failed.
+					// AN ERROR OCCURED 
+					_incoming_packet.setErrorCode( CHECKSUM_FAILURE );
 					return;
 				}
-				// ...Then check if the end of the packet has been reached (which should be the checksum).
-				// Note: When setFrameLengthLSB() was last called, the frame length of the incoming packet was updated
-				// based on the MSB and LSB. Therefore, the frame length should not have increased due to calls to
-				// setOutgoingFrameData(). 
-				// This length does not include the start byte, MSB, LSB, or checksum byte. Therefore, the length
-				// plus 3 should be the position of the checksum (i.e. frame length plus 4 minus 1).
-				if ( (_incoming_packet.getFrameLength() + 3) == _in_index ) {
-					// Verify checksum using the bitwise AND operator (&)
-					if ( 0xff == (_in_checksum & 0xff) ) {
-						// Success!!! The packet was completely received and the checksum verified.
-						setComplete(true);
-						_incoming_packet.setChecksum(_in_checksum);
-						_incoming_packet.setErrorCode( NO_ERROR );
-					}else{
-						// Failure!!! The packet is not usable because the checksum failed.
-						// AN ERROR OCCURED 
-						_incoming_packet.setErrorCode( CHECKSUM_FAILURE );
-						return;
-					}
 					
 					
 					// TODO: Process packet?
 					
 					
-					return;
-				}
+				return;
+			}
 				
-				// Otherwise, beginning with Packet index 3 (Frame index 0), store byte is FrameData array.
-				// Frame index 0 should contain the Frame Type
-				_incoming_packet.setFrameData( (_in_index - FRAME_TYPE_INDEX) , _in_byte);
-				_in_index++;
-			}    
+			// Otherwise, beginning with Packet index 3 (Frame index 0), store byte is FrameData array.
+			// Frame index 0 should contain the Frame Type
+			_incoming_packet.setFrameData( (i - FRAME_TYPE_INDEX) , _buffer[i]);  
 		}
 	}	
 }
@@ -856,7 +806,9 @@ void SimpleZigBeeRadio::writeByte(uint8_t byte){
 *  @ param uint8_t byte: Byte to write to serial port
 */
 void SimpleZigBeeRadio::write(uint8_t byte){
-	_serial->write(byte);
+	std::string data;
+	data[0] = byte;
+	_serial.Write(data);
 }
 
 /**
@@ -868,7 +820,6 @@ void SimpleZigBeeRadio::write(uint8_t byte){
 void SimpleZigBeeRadio::flush(){
 	// For HardwareSerial, this will wait until TX buffer is clear
 	// For SoftwareSerial, there is no TX buffer and so this simply returns
-	_serial->flush();
 }
 
 /*//////////////////////////////////////////////////////////////////////
@@ -1135,14 +1086,6 @@ void SimpleZigBeeRadio::prepareRemoteATCommand(uint32_t adr64MSB, uint32_t adr64
 	prepareRemoteATCommand(adr64MSB,adr64LSB,adr16,command);
 	setRemoteATCommandPayload(payload, payloadSize);
 }
-
-
-
-
-
-
-
-
 
 /**
 *  Method: prepareRemoteATCommand(SimpleZigBeeAddress address, uint16_t command)

@@ -77,10 +77,16 @@
 #define SimpleZigBeeRadio_h
 
 // Requires SimpleZigBeePacket classes
-#include <stdlib.h>
 #include "SimpleZigBeePacket.h"
+
+// For Stream class (serial port object)
+#include "CppLinuxSerial/SerialPort.hpp"
+
 // Required for uint8_t type
 #include <inttypes.h>
+#include <string>
+
+using namespace mn::CppLinuxSerial;
 
 /**
 * Class: SimpleZigBeeRadio
@@ -100,8 +106,6 @@ public:
 	void reset();
 	void resetIncoming();
 	void resetOutgoing();
-	void setSerial(HardwareSerial & serial);
-	void setSerial(Stream & serial);
 	
 	// PACKET METHODS //
 	SimpleIncomingZigBeePacket & getIncomingPacketObject();
@@ -224,7 +228,8 @@ public:
 	
 	
 private:
-	Stream * _serial;
+	
+	SerialPort _serial;
 	// Boolean indicating whether or not XBee radio is in escaped API Mode (ATAP=2) 
 	bool _escaped_mode;
 	// Boolean indicating whether or not serial port is SoftwareSerial 
@@ -232,10 +237,9 @@ private:
 
 	// Object for storing incoming packet
 	SimpleIncomingZigBeePacket _incoming_packet;
-	// Most recent byte received from incoming packet
-	uint8_t _in_byte;
-	// Current index of incoming packet
-	int _in_index;
+	// byte buffer from the serial port
+	std::string _buffer;
+
 	// Current checksum of incoming packet
 	uint8_t _in_checksum;
 	// Escape the next byte of incoming packet
