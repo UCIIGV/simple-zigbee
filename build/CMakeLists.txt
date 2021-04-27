@@ -7,7 +7,8 @@ file(GLOB SOURCES ../src/*.cpp)
 
 include_directories(../include /usr/local/include)
 
-set(CMAKE_LIBRARY_PATH ../lib)
+set(LIBRARY_OUTPUT_PATH ../lib)
+
 add_library(Zigbee ${SOURCES})
 
 target_link_libraries(Zigbee "/usr/local/include/CppLinuxSerial.a")
